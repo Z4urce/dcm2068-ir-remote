@@ -41,6 +41,9 @@ Up Right - UNO 7
 54 - Stop
 63 - Disk / Mp3 Link
 
+112 - Next album
+113 - Previous album
+
 == Address 16:
 13 - Mute
 16 - Volume UP
@@ -53,13 +56,18 @@ Up Right - UNO 7
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <Wire.h>
-#include <Rc5Renderer.h>
-#include <IrSenderPwm.h>
 
 // HARDWARE INIT ==================
 
+// IR
+#define DISABLE_CODE_FOR_RECEIVER
+#define SEND_PWM_BY_TIMER
+#define NO_LED_FEEDBACK_CODE
+#define IR_SEND_PIN 3
+#include <IRremote.hpp>
+
 // Display
-U8G2_SSD1306_128X64_NONAME_1_SW_I2C u8g2(U8G2_R0, /* clock=*/ SCL, /* data=*/ SDA, /* reset=*/ U8X8_PIN_NONE);   // All Boards without Reset of the Display
+U8G2_SSD1306_128X64_NONAME_1_SW_I2C u8g2(U8G2_R0, SCL, SDA, U8X8_PIN_NONE);
 
 // Rotary encoder
 #define RotaryPinA 2
@@ -70,10 +78,6 @@ volatile bool fired;
 volatile bool rotation_cw;
 uint8_t Count = 0;
 
-// Infrared
-#define IRPin 3
-IrSender *sender;
-
 // NAVIGATION ===================
 
 
@@ -83,7 +87,7 @@ IrSender *sender;
 
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   
   u8g2.begin();
   u8g2.setDisplayRotation(U8G2_R2);
@@ -95,10 +99,7 @@ void setup() {
   pinMode(RotaryBtnPin, INPUT_PULLUP);
   attachInterrupt (digitalPinToInterrupt(RotaryPinA), isr, CHANGE);
 
-  pinMode(IRPin, OUTPUT);
-  digitalWrite(IRPin, LOW);
-
-  sender = IrSenderPwm::newInstance(IRPin);
+  IrSender.begin();
   Serial.println("Init done");
   
   redraw_menu();
@@ -122,11 +123,9 @@ void loop() {
 }
 
 void send_ir_command(uint8_t function) {
-  noInterrupts();
-  const IrSignal *signal = Rc5Renderer::newIrSignal(20, function);
-  sender->sendIrSignal(*signal);
-  delete signal;
-  interrupts();
+  //noInterrupts();
+  IrSender.sendRC5(20, function, 0, true);
+  //interrupts();
 }
 
 void redraw_menu() {
