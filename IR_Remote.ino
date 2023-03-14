@@ -73,36 +73,33 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, SCL, SDA, U8X8_PIN_NONE);
 #define RotaryPinA 2
 #define RotaryPinB 4
 #define RotaryBtnPin 7
-
-volatile bool fired;
-volatile bool rotation_cw;
+#include <Encoder.h>
+Encoder myEnc(RotaryPinA, RotaryPinB);
 uint8_t Count = 0;
+bool is_button_down;
+bool button_changed;
 
 // NAVIGATION ===================
 
+typedef struct { 
+  char* name;
+  uint8_t device;
+  uint8_t function;
+  uint8_t function_pair;
+} menu;
 
+const menu main_menu[] {
+    {"Volume", 16, 16, 17},
+    {"Track", 20, 32, 33},
+    {"Album", 20, 112, 113},
+    {"Power", 20, 12, 0},
+    {"Shuffle", 20, 29, 0}
+};
 
+bool inside_function;
+int8_t function_counter;
 
 // FUNCTIONS ====================
-
-#ifdef __arm__
-// should use uinstd.h to define sbrk but Due causes a conflict
-extern "C" char* sbrk(int incr);
-#else  // __ARM__
-extern char *__brkval;
-#endif  // __arm__
-
-int freeMemory() {
-  char top;
-#ifdef __arm__
-  return &top - reinterpret_cast<char*>(sbrk(0));
-#elif defined(CORE_TEENSY) || (ARDUINO > 103 && ARDUINO != 151)
-  return &top - __brkval;
-#else  // __arm__
-  return __brkval ? &top - __brkval : &top - __malloc_heap_start;
-#endif  // __arm__
-}
-
 
 
 void setup() {
@@ -113,71 +110,108 @@ void setup() {
   u8g2.setFont(u8g2_font_ncenB10_tr);
   u8g2.setFontMode(1);
 
-  pinMode(RotaryPinA, INPUT_PULLUP);
-  pinMode(RotaryPinB, INPUT_PULLUP);
   pinMode(RotaryBtnPin, INPUT_PULLUP);
-  attachInterrupt (digitalPinToInterrupt(RotaryPinA), isr, CHANGE);
 
   IrSender.begin();
-  Serial.print(F("Init done. Free memory: "));
-  Serial.println(freeMemory());
+  Serial.print(F("Init done."));
   
-  redraw_menu();
+  return_to_menu();
 }
 
 void loop() {
-  if (fired) {
-    if (rotation_cw) Count++;
-    else Count--;
-    fired = false;
+  bool button_state = digitalRead(RotaryBtnPin) == LOW;
+  button_changed = button_state != is_button_down;
+  is_button_down = button_state;
 
-    Serial.print(F("Rotation: "));
+  int8_t new_count = myEnc.read() / 4;
+
+  if (inside_function) {
+    if (is_button_pressed()) {
+      return_to_menu();
+      return;
+    }
+
+    if (new_count != function_counter){
+      draw_function();
+
+      send_ir_command(main_menu[Count].device, new_count > function_counter ?
+        main_menu[Count].function :
+        main_menu[Count].function_pair);
+      
+      function_counter = new_count;
+    }
+    return;
+  }
+
+  if (Count != new_count) {
+    Count = new_count;
+
+    Serial.print(F("Count: "));
     Serial.println(Count);
 
     redraw_menu();
   }
 
-  if (button_pressed()){
-    send_ir_command(Count);
+  handle_menu_button_press();
+}
+
+void handle_menu_button_press() {
+  if (is_button_pressed() && Count < main_menu_length()){
+    if (main_menu[Count].function_pair == 0) {
+      send_ir_command(main_menu[Count].device, main_menu[Count].function);
+      return;
+    }
+    enter_function();
   }
 }
 
-void send_ir_command(uint8_t function) {
-  //noInterrupts();
-  IrSender.sendRC5(20, function, 0, true);
-  //interrupts();
+void enter_function() {
+  myEnc.readAndReset();
+  function_counter = 0;
+  inside_function = true;
+  draw_function();
+}
+
+void return_to_menu() {
+  myEnc.readAndReset();
+  inside_function = false;
+  redraw_menu();
+}
+
+void send_ir_command(uint8_t device, uint8_t function) {
+  IrSender.sendRC5(device, function, 0, true);
+}
+
+void draw_function() {
+  u8g2.clearBuffer();
+  u8g2.setDrawColor(1);
+  u8g2.drawStr(32,32, main_menu[Count].name);
+  u8g2.sendBuffer();
 }
 
 void redraw_menu() {
-  //u8g2.firstPage();
+  uint8_t menu_offset = Count > 3 ? Count - 3 : 0;
+
   u8g2.clearBuffer();
-  //do {
-    u8g2.setDrawColor(1);
-    u8g2.drawRBox(0, (Count%4)*16 + 4, 128, 14, 4);
-    u8g2.setDrawColor(2);
-    u8g2.drawStr(16,16, "Volume");
-    u8g2.drawStr(16,32, "Album");
-    u8g2.drawStr(16,48, "Track");
-    char str[12];
-    sprintf(str, "Command: %d", Count);
-    u8g2.drawStr(16,64, str);
-    u8g2.sendBuffer();
-  //}  while (u8g2.nextPage());
+  u8g2.setDrawColor(1);
+  u8g2.drawRBox(0, ((Count-menu_offset)%4)*16 + 4, 128, 14, 4);
+  u8g2.setDrawColor(2);
+  
 
-  Serial.print(F("Free memory: "));
-  Serial.println(freeMemory());
-}
-
-void isr ()
-{
-  if (digitalRead (RotaryPinA) == LOW) {
-    return;
+  for(uint8_t i = 0; i < 4 || (i+menu_offset) < main_menu_length(); ++i) {
+      u8g2.drawStr(16,16 + i*16, main_menu[i+menu_offset].name);
   }
 
-  rotation_cw = digitalRead(RotaryPinB);
-  fired = true;
+  //char str[12];
+  //sprintf(str, "Command: %d", Count);
+  //u8g2.drawStr(16,64, str);
+  u8g2.sendBuffer();
 }
 
-bool button_pressed() {
-  return digitalRead(RotaryBtnPin) == LOW;
+size_t main_menu_length() {
+  return sizeof(main_menu)/sizeof(menu);
+}
+
+bool is_button_pressed() {
+  return button_changed && is_button_down;
 }
