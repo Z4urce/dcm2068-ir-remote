@@ -67,7 +67,7 @@ Up Right - UNO 7
 #include <IRremote.hpp>
 
 // Display
-U8G2_SSD1306_128X64_NONAME_1_SW_I2C u8g2(U8G2_R0, SCL, SDA, U8X8_PIN_NONE);
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, SCL, SDA, U8X8_PIN_NONE);
 
 // Rotary encoder
 #define RotaryPinA 2
@@ -85,6 +85,25 @@ uint8_t Count = 0;
 
 // FUNCTIONS ====================
 
+#ifdef __arm__
+// should use uinstd.h to define sbrk but Due causes a conflict
+extern "C" char* sbrk(int incr);
+#else  // __ARM__
+extern char *__brkval;
+#endif  // __arm__
+
+int freeMemory() {
+  char top;
+#ifdef __arm__
+  return &top - reinterpret_cast<char*>(sbrk(0));
+#elif defined(CORE_TEENSY) || (ARDUINO > 103 && ARDUINO != 151)
+  return &top - __brkval;
+#else  // __arm__
+  return __brkval ? &top - __brkval : &top - __malloc_heap_start;
+#endif  // __arm__
+}
+
+
 
 void setup() {
   Serial.begin(115200);
@@ -100,7 +119,8 @@ void setup() {
   attachInterrupt (digitalPinToInterrupt(RotaryPinA), isr, CHANGE);
 
   IrSender.begin();
-  Serial.println("Init done");
+  Serial.print(F("Init done. Free memory: "));
+  Serial.println(freeMemory());
   
   redraw_menu();
 }
@@ -111,7 +131,7 @@ void loop() {
     else Count--;
     fired = false;
 
-    Serial.print("Rotation: ");
+    Serial.print(F("Rotation: "));
     Serial.println(Count);
 
     redraw_menu();
@@ -129,8 +149,9 @@ void send_ir_command(uint8_t function) {
 }
 
 void redraw_menu() {
-  u8g2.firstPage();
-  do {
+  //u8g2.firstPage();
+  u8g2.clearBuffer();
+  //do {
     u8g2.setDrawColor(1);
     u8g2.drawRBox(0, (Count%4)*16 + 4, 128, 14, 4);
     u8g2.setDrawColor(2);
@@ -140,8 +161,11 @@ void redraw_menu() {
     char str[12];
     sprintf(str, "Command: %d", Count);
     u8g2.drawStr(16,64, str);
+    u8g2.sendBuffer();
+  //}  while (u8g2.nextPage());
 
-  }  while (u8g2.nextPage());
+  Serial.print(F("Free memory: "));
+  Serial.println(freeMemory());
 }
 
 void isr ()
