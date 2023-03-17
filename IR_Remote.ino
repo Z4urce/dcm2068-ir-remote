@@ -106,7 +106,7 @@ bool inside_function;
 int8_t function_counter;
 
 // SLEEP MODE ===================
-#define TIME_TO_SLEEP 10000
+#define TIME_TO_SLEEP 15000
 unsigned long last_interaction;
 
 // FUNCTIONS ====================
@@ -155,13 +155,17 @@ void loop() {
     return;
   }
 
-  if (Count != (new_count + count_diff)) {
-    if (new_count >= main_menu_length()) {
+  int8_t count_with_diff = new_count + count_diff;
+  if (Count != count_with_diff) {
+    if (count_with_diff >= main_menu_length()) {
       reset_menu_count_diff();
-      new_count = 0;
+      if (new_count < 0) {
+        count_diff = main_menu_length() - 1;
+      }
+      count_with_diff = 0;
     }
 
-    Count = (new_count + count_diff);
+    Count = count_with_diff;
 
     Serial.print(F("Count: "));
     Serial.println(Count);
@@ -210,14 +214,14 @@ void handle_menu_button_press() {
 }
 
 void enter_function() {
-  myEnc.readAndReset();
+  count_diff = (myEnc.readAndReset() / 4) + count_diff;
   function_counter = 0;
   inside_function = true;
   redraw_function();
 }
 
 void return_to_menu() {
-  reset_menu_count_diff();
+  myEnc.readAndReset();
   inside_function = false;
   redraw_menu();
 }
@@ -230,8 +234,10 @@ void redraw_function() {
   reset_sleep_timer();
   u8g2.clearBuffer();
   u8g2.setDrawColor(1);
-  u8g2.drawStr(32,32, main_menu[Count].name);
-  u8g2.drawStr(32,48, "(-) (BACK) (+)");
+  u8g2.drawStr(32,30, main_menu[Count].name);
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+  u8g2.drawStr(16,50, "<[-]< [BACK] >[+]>");
+  u8g2.setFont(u8g2_font_ncenB10_tr);
   u8g2.sendBuffer();
 }
 
