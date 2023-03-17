@@ -56,6 +56,7 @@ Up Right - UNO 7
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <Wire.h>
+#include <avr/sleep.h>
 
 // HARDWARE INIT ==================
 
@@ -76,6 +77,7 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, SCL, SDA, U8X8_PIN_NONE);
 #include <Encoder.h>
 Encoder myEnc(RotaryPinA, RotaryPinB);
 uint8_t Count = 0;
+uint8_t count_diff = 0;
 bool is_button_down;
 bool button_changed;
 
@@ -93,11 +95,19 @@ const menu main_menu[] {
     {"Track", 20, 32, 33},
     {"Album", 20, 112, 113},
     {"Power", 20, 12, 0},
-    {"Shuffle", 20, 29, 0}
+    {"Play/Pause", 20, 53, 0},
+    {"Shuffle", 20, 29, 0},
+    {"EQ", 16, 70, 0},
+    {"Tami <3", 20, 15, 0},
+    {"Source", 20, 63, 0}
 };
 
 bool inside_function;
 int8_t function_counter;
+
+// SLEEP MODE ===================
+#define TIME_TO_SLEEP 10000
+unsigned long last_interaction;
 
 // FUNCTIONS ====================
 
@@ -123,6 +133,8 @@ void loop() {
   button_changed = button_state != is_button_down;
   is_button_down = button_state;
 
+  TryEnterSleepMode();
+
   int8_t new_count = myEnc.read() / 4;
 
   if (inside_function) {
@@ -132,7 +144,7 @@ void loop() {
     }
 
     if (new_count != function_counter){
-      draw_function();
+      redraw_function();
 
       send_ir_command(main_menu[Count].device, new_count > function_counter ?
         main_menu[Count].function :
@@ -143,8 +155,13 @@ void loop() {
     return;
   }
 
-  if (Count != new_count) {
-    Count = new_count;
+  if (Count != (new_count + count_diff)) {
+    if (new_count >= main_menu_length()) {
+      reset_menu_count_diff();
+      new_count = 0;
+    }
+
+    Count = (new_count + count_diff);
 
     Serial.print(F("Count: "));
     Serial.println(Count);
@@ -155,10 +172,37 @@ void loop() {
   handle_menu_button_press();
 }
 
+void reset_menu_count_diff() {
+  myEnc.readAndReset();
+  count_diff = 0;
+}
+
+void reset_sleep_timer() {
+  last_interaction = millis();
+  u8g2.setPowerSave(false);
+  sleep_disable();
+}
+
+void TryEnterSleepMode() {
+  if (!should_sleep()) {
+    return;
+  }
+
+  u8g2.setPowerSave(true);
+  set_sleep_mode(SLEEP_MODE_STANDBY);  
+  sleep_enable();
+  sleep_cpu (); 
+}
+
+bool should_sleep() {
+  return millis() - last_interaction > TIME_TO_SLEEP;
+}
+
 void handle_menu_button_press() {
   if (is_button_pressed() && Count < main_menu_length()){
     if (main_menu[Count].function_pair == 0) {
       send_ir_command(main_menu[Count].device, main_menu[Count].function);
+      reset_sleep_timer();
       return;
     }
     enter_function();
@@ -169,11 +213,11 @@ void enter_function() {
   myEnc.readAndReset();
   function_counter = 0;
   inside_function = true;
-  draw_function();
+  redraw_function();
 }
 
 void return_to_menu() {
-  myEnc.readAndReset();
+  reset_menu_count_diff();
   inside_function = false;
   redraw_menu();
 }
@@ -182,14 +226,17 @@ void send_ir_command(uint8_t device, uint8_t function) {
   IrSender.sendRC5(device, function, 0, true);
 }
 
-void draw_function() {
+void redraw_function() {
+  reset_sleep_timer();
   u8g2.clearBuffer();
   u8g2.setDrawColor(1);
   u8g2.drawStr(32,32, main_menu[Count].name);
+  u8g2.drawStr(32,48, "(-) (BACK) (+)");
   u8g2.sendBuffer();
 }
 
 void redraw_menu() {
+  reset_sleep_timer();
   uint8_t menu_offset = Count > 3 ? Count - 3 : 0;
 
   u8g2.clearBuffer();
