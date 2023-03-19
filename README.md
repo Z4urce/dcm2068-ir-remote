@@ -6,3 +6,7 @@ You'll need:
 - Rotary encoder
 - IR transmitter LED
 - Power source 3~5V (I've used 2xAAA batteries)
+- 16 Mhz Oscillator (Not in schematic. Look it up in ATmega328P reference)
+
+
+![schematic](schematic.png)
